@@ -2585,6 +2585,21 @@ void GenerateBytesWrapper(const GeneratorOptions& options, io::Printer* printer,
 void Generator::GenerateClassField(const GeneratorOptions& options,
                                    io::Printer* printer,
                                    const FieldDescriptor* field) const {
+    // Define getter/setter method
+  printer->Print(
+      "Object.defineProperty($class$.prototype, \"$fieldname$\", {\n"
+      "  set: function(value) {\n"
+      "    this.$settername$(value);\n"
+      "  },\n"
+      "  get: function() {\n"
+      "    return this.$gettername$();\n"
+      "  },\n"
+      "});\n\n\n",
+      "class", GetMessagePath(options, field->containing_type()),
+      "fieldname", JSObjectFieldName(options, field),
+      "gettername", "get" + JSGetterName(options, field),
+      "settername", "set" + JSGetterName(options, field));
+
   if (field->is_map()) {
     const FieldDescriptor* key_field = MapFieldKey(field);
     const FieldDescriptor* value_field = MapFieldValue(field);
@@ -2840,20 +2855,7 @@ void Generator::GenerateClassField(const GeneratorOptions& options,
           (field->is_repeated() ? " || []" : ""));
     }
 
-  // Define getter method
-  printer->Print(
-      "Object.defineProperty($class$.prototype, \"$fieldname$\", {\n"
-      "  set: function(value) {\n"
-      "    this.$settername$(value);\n"
-      "  },\n"
-      "  get: function() {\n"
-      "    return this.$gettername$();\n"
-      "  },\n"
-      "});\n\n\n",
-      "class", GetMessagePath(options, field->containing_type()),
-      "fieldname", JSObjectFieldName(options, field),
-      "gettername", "get" + JSGetterName(options, field),
-      "settername", "set" + JSGetterName(options, field));
+
 
     if (untyped) {
       printer->Print(
