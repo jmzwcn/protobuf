@@ -30,6 +30,8 @@
 
 #include <google/protobuf/compiler/java/java_map_field_lite.h>
 
+#include <cstdint>
+
 #include <google/protobuf/compiler/java/java_context.h>
 #include <google/protobuf/compiler/java/java_doc_comment.h>
 #include <google/protobuf/compiler/java/java_helpers.h>
@@ -92,13 +94,15 @@ void SetMessageVariables(const FieldDescriptor* descriptor, int messageBitIndex,
   (*variables)["boxed_key_type"] = TypeName(key, name_resolver, true);
   (*variables)["key_wire_type"] = WireType(key);
   (*variables)["key_default_value"] = DefaultValue(key, true, name_resolver);
+  // We use `x.getClass()` as a null check because it generates less bytecode
+  // than an `if (x == null) { throw ... }` statement.
   (*variables)["key_null_check"] =
       IsReferenceType(keyJavaType)
-          ? "if (key == null) { throw new java.lang.NullPointerException(); }"
+          ? "java.lang.Class<?> keyClass = key.getClass();"
           : "";
   (*variables)["value_null_check"] =
       IsReferenceType(valueJavaType)
-          ? "if (value == null) { throw new java.lang.NullPointerException(); }"
+          ? "java.lang.Class<?> valueClass = value.getClass();"
           : "";
 
   if (GetJavaType(value) == JAVATYPE_ENUM) {
@@ -503,14 +507,14 @@ void ImmutableMapFieldLiteGenerator::GenerateMembers(
 }
 
 void ImmutableMapFieldLiteGenerator::GenerateFieldInfo(
-    io::Printer* printer, std::vector<uint16>* output) const {
+    io::Printer* printer, std::vector<uint16_t>* output) const {
   WriteIntToUtf16CharSequence(descriptor_->number(), output);
   WriteIntToUtf16CharSequence(GetExperimentalJavaFieldType(descriptor_),
                               output);
   printer->Print(variables_,
                  "\"$name$_\",\n"
                  "$default_entry$,\n");
-  if (SupportFieldPresence(descriptor_->file()) &&
+  if (!SupportUnknownEnumValue(descriptor_) &&
       GetJavaType(ValueField(descriptor_)) == JAVATYPE_ENUM) {
     PrintEnumVerifierLogic(printer, ValueField(descriptor_), variables_,
                            /*var_name=*/"$value_enum_type$",

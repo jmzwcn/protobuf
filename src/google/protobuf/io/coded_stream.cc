@@ -48,9 +48,9 @@
 
 #include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/stubs/common.h>
-#include <google/protobuf/io/coded_stream_inl.h>
-#include <google/protobuf/io/zero_copy_stream.h>
 #include <google/protobuf/arena.h>
+#include <google/protobuf/io/zero_copy_stream.h>
+#include <google/protobuf/io/zero_copy_stream_impl_lite.h>
 #include <google/protobuf/stubs/stl_util.h>
 
 
@@ -190,12 +190,13 @@ int CodedInputStream::BytesUntilTotalBytesLimit() const {
 }
 
 void CodedInputStream::PrintTotalBytesLimitError() {
-  GOOGLE_LOG(ERROR) << "A protocol message was rejected because it was too "
-                "big (more than "
-             << total_bytes_limit_
-             << " bytes).  To increase the limit (or to disable these "
-                "warnings), see CodedInputStream::SetTotalBytesLimit() "
-                "in net/proto2/io/public/coded_stream.h.";
+  GOOGLE_LOG(ERROR)
+      << "A protocol message was rejected because it was too "
+         "big (more than "
+      << total_bytes_limit_
+      << " bytes).  To increase the limit (or to disable these "
+         "warnings), see CodedInputStream::SetTotalBytesLimit() "
+         "in third_party/protobuf/src/google/protobuf/io/coded_stream.h.";
 }
 
 bool CodedInputStream::SkipFallback(int count, int original_buffer_size) {
@@ -238,12 +239,39 @@ bool CodedInputStream::GetDirectBufferPointer(const void** data, int* size) {
 }
 
 bool CodedInputStream::ReadRaw(void* buffer, int size) {
-  return InternalReadRawInline(buffer, size);
+  int current_buffer_size;
+  while ((current_buffer_size = BufferSize()) < size) {
+    // Reading past end of buffer.  Copy what we have, then refresh.
+    memcpy(buffer, buffer_, current_buffer_size);
+    buffer = reinterpret_cast<uint8*>(buffer) + current_buffer_size;
+    size -= current_buffer_size;
+    Advance(current_buffer_size);
+    if (!Refresh()) return false;
+  }
+
+  memcpy(buffer, buffer_, size);
+  Advance(size);
+
+  return true;
 }
 
 bool CodedInputStream::ReadString(std::string* buffer, int size) {
   if (size < 0) return false;  // security: size is often user-supplied
-  return InternalReadStringInline(buffer, size);
+
+  if (BufferSize() >= size) {
+    STLStringResizeUninitialized(buffer, size);
+    std::pair<char*, bool> z = as_string_data(buffer);
+    if (z.second) {
+      // Oddly enough, memcpy() requires its first two args to be non-NULL even
+      // if we copy 0 bytes.  So, we have ensured that z.first is non-NULL here.
+      GOOGLE_DCHECK(z.first != NULL);
+      memcpy(z.first, buffer_, size);
+      Advance(size);
+    }
+    return true;
+  }
+
+  return ReadStringFallback(buffer, size);
 }
 
 bool CodedInputStream::ReadStringFallback(std::string* buffer, int size) {
@@ -284,7 +312,7 @@ bool CodedInputStream::ReadLittleEndian32Fallback(uint32* value) {
   uint8 bytes[sizeof(*value)];
 
   const uint8* ptr;
-  if (BufferSize() >= sizeof(*value)) {
+  if (BufferSize() >= static_cast<int64>(sizeof(*value))) {
     // Fast path:  Enough bytes in the buffer to read directly.
     ptr = buffer_;
     Advance(sizeof(*value));
@@ -301,7 +329,7 @@ bool CodedInputStream::ReadLittleEndian64Fallback(uint64* value) {
   uint8 bytes[sizeof(*value)];
 
   const uint8* ptr;
-  if (BufferSize() >= sizeof(*value)) {
+  if (BufferSize() >= static_cast<int64>(sizeof(*value))) {
     // Fast path:  Enough bytes in the buffer to read directly.
     ptr = buffer_;
     Advance(sizeof(*value));
@@ -323,7 +351,7 @@ template <size_t N>
 const uint8* DecodeVarint64KnownSize(const uint8* buffer, uint64* value) {
   GOOGLE_DCHECK_GT(N, 0);
   uint64 result = static_cast<uint64>(buffer[N - 1]) << (7 * (N - 1));
-  for (int i = 0, offset = 0; i < N - 1; i++, offset += 7) {
+  for (size_t i = 0, offset = 0; i < N - 1; i++, offset += 7) {
     result += static_cast<uint64>(buffer[i] - 0x80) << offset;
   }
   *value = result;
@@ -838,7 +866,7 @@ uint8* EpsCopyOutputStream::WriteRawLittleEndian32(const void* data, int size,
   auto p = static_cast<const uint8*>(data);
   auto end = p + size;
   while (end - p >= kSlopBytes) {
-    EnsureSpace(&ptr);
+    ptr = EnsureSpace(ptr);
     uint32 buffer[4];
     static_assert(sizeof(buffer) == kSlopBytes, "Buffer must be kSlopBytes");
     std::memcpy(buffer, p, kSlopBytes);
@@ -847,7 +875,7 @@ uint8* EpsCopyOutputStream::WriteRawLittleEndian32(const void* data, int size,
       ptr = CodedOutputStream::WriteLittleEndian32ToArray(x, ptr);
   }
   while (p < end) {
-    EnsureSpace(&ptr);
+    ptr = EnsureSpace(ptr);
     uint32 buffer;
     std::memcpy(&buffer, p, 4);
     p += 4;
@@ -861,7 +889,7 @@ uint8* EpsCopyOutputStream::WriteRawLittleEndian64(const void* data, int size,
   auto p = static_cast<const uint8*>(data);
   auto end = p + size;
   while (end - p >= kSlopBytes) {
-    EnsureSpace(&ptr);
+    ptr = EnsureSpace(ptr);
     uint64 buffer[2];
     static_assert(sizeof(buffer) == kSlopBytes, "Buffer must be kSlopBytes");
     std::memcpy(buffer, p, kSlopBytes);
@@ -870,7 +898,7 @@ uint8* EpsCopyOutputStream::WriteRawLittleEndian64(const void* data, int size,
       ptr = CodedOutputStream::WriteLittleEndian64ToArray(x, ptr);
   }
   while (p < end) {
-    EnsureSpace(&ptr);
+    ptr = EnsureSpace(ptr);
     uint64 buffer;
     std::memcpy(&buffer, p, 8);
     p += 8;
@@ -884,7 +912,7 @@ uint8* EpsCopyOutputStream::WriteRawLittleEndian64(const void* data, int size,
 uint8* EpsCopyOutputStream::WriteStringMaybeAliasedOutline(uint32 num,
                                                            const std::string& s,
                                                            uint8* ptr) {
-  EnsureSpace(&ptr);
+  ptr = EnsureSpace(ptr);
   uint32 size = s.size();
   ptr = WriteLengthDelim(num, size, ptr);
   return WriteRawMaybeAliased(s.data(), size, ptr);
@@ -892,7 +920,7 @@ uint8* EpsCopyOutputStream::WriteStringMaybeAliasedOutline(uint32 num,
 
 uint8* EpsCopyOutputStream::WriteStringOutline(uint32 num, const std::string& s,
                                                uint8* ptr) {
-  EnsureSpace(&ptr);
+  ptr = EnsureSpace(ptr);
   uint32 size = s.size();
   ptr = WriteLengthDelim(num, size, ptr);
   return WriteRaw(s.data(), size, ptr);
@@ -923,6 +951,28 @@ uint8* CodedOutputStream::WriteStringWithSizeToArray(const std::string& str,
   return WriteStringToArray(str, target);
 }
 
+uint8* CodedOutputStream::WriteVarint32ToArrayOutOfLineHelper(uint32 value,
+                                                              uint8* target) {
+  GOOGLE_DCHECK_GE(value, 0x80);
+  target[0] |= static_cast<uint8>(0x80);
+  value >>= 7;
+  target[1] = static_cast<uint8>(value);
+  if (value < 0x80) {
+    return target + 2;
+  }
+  target += 2;
+  do {
+    // Turn on continuation bit in the byte we just wrote.
+    target[-1] |= static_cast<uint8>(0x80);
+    value >>= 7;
+    *target = static_cast<uint8>(value);
+    ++target;
+  } while (value >= 0x80);
+  return target;
+}
+
 }  // namespace io
 }  // namespace protobuf
 }  // namespace google
+
+#include <google/protobuf/port_undef.inc>

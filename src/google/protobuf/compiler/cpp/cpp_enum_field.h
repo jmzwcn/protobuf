@@ -58,9 +58,9 @@ class EnumFieldGenerator : public FieldGenerator {
   void GenerateSwappingCode(io::Printer* printer) const;
   void GenerateConstructorCode(io::Printer* printer) const;
   void GenerateCopyConstructorCode(io::Printer* printer) const;
-  void GenerateMergeFromCodedStream(io::Printer* printer) const;
   void GenerateSerializeWithCachedSizesToArray(io::Printer* printer) const;
   void GenerateByteSize(io::Printer* printer) const;
+  void GenerateConstinitInitializer(io::Printer* printer) const;
 
  private:
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(EnumFieldGenerator);
@@ -101,6 +101,7 @@ class RepeatedEnumFieldGenerator : public FieldGenerator {
   void GenerateMergeFromCodedStreamWithPacking(io::Printer* printer) const;
   void GenerateSerializeWithCachedSizesToArray(io::Printer* printer) const;
   void GenerateByteSize(io::Printer* printer) const;
+  void GenerateConstinitInitializer(io::Printer* printer) const;
 
  private:
   GOOGLE_DISALLOW_EVIL_CONSTRUCTORS(RepeatedEnumFieldGenerator);

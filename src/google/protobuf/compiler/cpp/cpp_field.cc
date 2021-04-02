@@ -33,12 +33,13 @@
 //  Sanjay Ghemawat, Jeff Dean, and others.
 
 #include <google/protobuf/compiler/cpp/cpp_field.h>
+
+#include <cstdint>
 #include <memory>
 
 #include <google/protobuf/compiler/cpp/cpp_helpers.h>
 #include <google/protobuf/compiler/cpp/cpp_primitive_field.h>
 #include <google/protobuf/compiler/cpp/cpp_string_field.h>
-
 #include <google/protobuf/stubs/logging.h>
 #include <google/protobuf/stubs/common.h>
 #include <google/protobuf/compiler/cpp/cpp_enum_field.h>
@@ -70,12 +71,11 @@ void SetCommonFieldVariables(const FieldDescriptor* descriptor,
 
   (*variables)["tag_size"] = StrCat(
       WireFormat::TagSize(descriptor->number(), descriptor->type()));
-  (*variables)["deprecated_attr"] =
-      DeprecatedAttribute(options, descriptor->options().deprecated());
+  (*variables)["deprecated_attr"] = DeprecatedAttribute(options, descriptor);
 
   (*variables)["set_hasbit"] = "";
   (*variables)["clear_hasbit"] = "";
-  if (HasFieldPresence(descriptor->file())) {
+  if (HasHasbit(descriptor)) {
     (*variables)["set_hasbit_io"] =
         "_Internal::set_has_" + FieldName(descriptor) + "(&_has_bits_);";
   } else {
@@ -91,8 +91,9 @@ void SetCommonFieldVariables(const FieldDescriptor* descriptor,
   (*variables)["}"] = "";
 }
 
-void FieldGenerator::SetHasBitIndex(int32 has_bit_index) {
-  if (!HasFieldPresence(descriptor_->file()) || has_bit_index == -1) {
+void FieldGenerator::SetHasBitIndex(int32_t has_bit_index) {
+  if (!HasHasbit(descriptor_)) {
+    GOOGLE_CHECK_EQ(has_bit_index, -1);
     return;
   }
   variables_["set_hasbit"] = StrCat(
@@ -113,17 +114,6 @@ void SetCommonOneofFieldVariables(
 }
 
 FieldGenerator::~FieldGenerator() {}
-
-void FieldGenerator::GenerateMergeFromCodedStreamWithPacking(
-    io::Printer* printer) const {
-  // Reaching here indicates a bug. Cases are:
-  //   - This FieldGenerator should support packing, but this method should be
-  //     overridden.
-  //   - This FieldGenerator doesn't support packing, and this method should
-  //     never have been called.
-  GOOGLE_LOG(FATAL) << "GenerateMergeFromCodedStreamWithPacking() "
-             << "called on field generator that does not support packing.";
-}
 
 FieldGeneratorMap::FieldGeneratorMap(const Descriptor* descriptor,
                                      const Options& options,
@@ -168,7 +158,7 @@ FieldGenerator* FieldGeneratorMap::MakeGenerator(
       default:
         return new RepeatedPrimitiveFieldGenerator(field, options);
     }
-  } else if (field->containing_oneof()) {
+  } else if (field->real_containing_oneof()) {
     switch (field->cpp_type()) {
       case FieldDescriptor::CPPTYPE_MESSAGE:
         return new MessageOneofFieldGenerator(field, options, scc_analyzer);
