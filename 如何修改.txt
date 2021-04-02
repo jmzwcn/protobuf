@@ -1,0 +1,5 @@
+适应grpc-web，两处改动
+
+https://github.com/protocolbuffers/protobuf/pull/5449
+
+https://github.com/protocolbuffers/protobuf/pull/6358
